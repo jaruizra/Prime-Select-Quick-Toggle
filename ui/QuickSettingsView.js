@@ -1,109 +1,161 @@
+import Clutter from 'gi://Clutter';
+import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import GObject from 'gi://GObject';
+import * as ModalDialog from 'resource:///org/gnome/shell/ui/modalDialog.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as QuickSettings from 'resource:///org/gnome/shell/ui/quickSettings.js';
 
-import * as Utility from '../lib/Utility.js';
+import * as PrimeSelect from '../lib/PrimeSelect.js';
+
+const PROFILE_ACTIONS = [
+    [PrimeSelect.PROFILE_INTEL, 'Switch to Intel'],
+    [PrimeSelect.PROFILE_ON_DEMAND, 'Switch to On-Demand'],
+    [PrimeSelect.PROFILE_NVIDIA, 'Switch to NVIDIA'],
+];
 
 export const QuickSettingsToggle = GObject.registerClass(
 class QuickSettingsToggle extends QuickSettings.QuickMenuToggle {  
-    _init(extensionObject) {
-        this.activeProfile = Utility.getCurrentProfile(); // initialzied profile since startup
-        this.chosenProfile = this.activeProfile === Utility.GPU_PROFILE_UNKNOWN // currently selected profile
-                ? 'unknown'
-                : this.activeProfile;
-        this.restartPending = false;
-        this.doNotSwitch = false;
-        
+    _init() {
+        this._profile = PrimeSelect.getCurrentProfile();
+        this._switching = false;
+
         super._init({
-            title: 'GPU Profile',
-            subtitle: Utility.capitalizeFirstLetter(this.chosenProfile),
+            title: 'GPU',
+            subtitle: PrimeSelect.getProfileLabel(this._profile),
             iconName: 'power-profile-performance-symbolic',
-            toggleMode: false, // disable the possibility to click the button
-            checked: this.activeProfile === 'hybrid' || this.activeProfile === 'nvidia',
+            toggleMode: false,
+            checked: this._profile === PrimeSelect.PROFILE_ON_DEMAND ||
+                this._profile === PrimeSelect.PROFILE_NVIDIA,
         });
-        this._all_settings = extensionObject.getSettings();
 
-        // This function is unique to this class. It adds a nice header with an icon, title and optional subtitle.
-        this.menu.setHeader('power-profile-performance-symbolic', super.title, 'Choose a GPU mode');
+        this.menu.setHeader('power-profile-performance-symbolic', this.title, 'Current PRIME mode');
+        this._openStateId = this.menu.connect('open-state-changed', (_menu, open) => {
+            if (open)
+                this._refresh();
+        });
 
-        // add a sections of items to the menu
         this._itemsSection = new PopupMenu.PopupMenuSection();
-        this._itemsSection.addAction('Integrated' + (this.activeProfile === 'integrated' ? ' (Active)' : ''), () => {
-            if (this.chosenProfile !== 'integrated' && !this.doNotSwitch) {
-                this.doNotSwitch = true;
-                super.subtitle = 'Switching...';
-                this.menu.setHeader('power-profile-performance-symbolic', super.title, 'Switching to Integrated mode...');
-                Utility.switchIntegrated(this._onSwitchComplete.bind(this));
-            }
-        });
-        this._itemsSection.addAction('Hybrid' + (this.activeProfile === 'hybrid' ? ' (Active)' : ''), () => {
-            if (this.chosenProfile !== 'hybrid' && !this.doNotSwitch) {
-                this.doNotSwitch = true;
-                super.subtitle = 'Switching...';
-                this.menu.setHeader('power-profile-performance-symbolic', super.title, 'Switching to Hybrid mode...');
-                Utility.switchHybrid(this._all_settings, this._onSwitchComplete.bind(this));
-            }
-        });
-        this._itemsSection.addAction('Nvidia'+ (this.activeProfile === 'nvidia' ? ' (Active)' : ''), () => {
-            if (this.chosenProfile !== 'nvidia' && !this.doNotSwitch) {
-                this.doNotSwitch = true;
-                super.subtitle = 'Switching...';
-                this.menu.setHeader('power-profile-performance-symbolic', super.title, 'Switching to Nvidia mode...');
-                Utility.switchNvidia(this._all_settings, this._onSwitchComplete.bind(this));
-            }
-        });
+        this._profileItems = [];
+        for (const [profile, label] of PROFILE_ACTIONS) {
+            const item = this._itemsSection.addAction(label, () => this._confirmSwitch(profile));
+            this._profileItems.push([profile, item]);
+        }
         this.menu.addMenuItem(this._itemsSection);
 
-        // Add an entry-point for more settings
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        const settingsItem = this.menu.addAction(
-            'More Settings',
-            () => extensionObject.openPreferences()
-        );
+        this._setupSeparator = new PopupMenu.PopupSeparatorMenuItem();
+        this.menu.addMenuItem(this._setupSeparator);
+        this._setupItem = this.menu.addAction('Setup required', () => this._showSetupProblem());
 
-        // Ensure the settings are unavailable when the screen is locked
-        settingsItem.visible = Main.sessionMode.allowSettings;
-        this.menu._settingsActions[extensionObject.uuid] = settingsItem;
+        this._refresh();
     }
 
-    _onSwitchComplete() {
-        // chosenProfile before switch
-        let priorProfile = this.chosenProfile;
-        this.chosenProfile = Utility.getCurrentProfile();
+    _refresh() {
+        this._setupProblem = PrimeSelect.getSetupProblem();
+        this._profile = PrimeSelect.getCurrentProfile();
+        this.subtitle = PrimeSelect.getProfileLabel(this._profile);
+        this.checked = this._profile === PrimeSelect.PROFILE_ON_DEMAND ||
+            this._profile === PrimeSelect.PROFILE_NVIDIA;
+        this._setupSeparator.visible = this._setupProblem !== null;
+        this._setupItem.visible = this._setupProblem !== null;
+        this.menu.setHeader(
+            'power-profile-performance-symbolic',
+            this.title,
+            this._setupProblem?.title ?? 'Current PRIME mode'
+        );
 
-        // if chosenProfile is the same as prior profile, operation aborted
-        if (this.chosenProfile === priorProfile) {
-            if (this.restartPending) {
-                super.subtitle = Utility.capitalizeFirstLetter(this.chosenProfile) + '*';
-                this.menu.setHeader('power-profile-performance-symbolic', super.title, 
-                    'Restart to apply ' + Utility.capitalizeFirstLetter(this.chosenProfile) + ' mode');
-            }
-            else { // GPU switch attempt aborted
-                super.subtitle = Utility.capitalizeFirstLetter(this.chosenProfile);
-                this.menu.setHeader('power-profile-performance-symbolic', super.title, 'Choose a GPU mode');
-            }
+        for (const [profile, item] of this._profileItems) {
+            item.setSensitive(
+                this._setupProblem === null &&
+                !this._switching &&
+                profile !== this._profile
+            );
         }
-        else if (this.activeProfile === this.chosenProfile) {
-            super.subtitle = Utility.capitalizeFirstLetter(this.activeProfile);
-            this.menu.setHeader('power-profile-performance-symbolic', super.title, 'Choose a GPU mode');
-            this.restartPending = false;
+    }
+
+    _confirmSwitch(profile) {
+        if (this._switching || profile === this._profile)
+            return;
+
+        if (this._setupProblem) {
+            this._showSetupProblem();
+            return;
         }
-        else {
-            super.subtitle = Utility.capitalizeFirstLetter(this.chosenProfile) + '*';
-            this.menu.setHeader('power-profile-performance-symbolic', super.title, 
-                'Restart to apply ' + Utility.capitalizeFirstLetter(this.chosenProfile) + ' mode');
-            Utility.requestReboot();
-            this.restartPending = true;
+
+        const label = PrimeSelect.getProfileLabel(profile);
+        const dialog = new ModalDialog.ModalDialog();
+
+        dialog.contentLayout.add_child(new St.Label({
+            text: `Switch GPU profile to ${label}?`,
+            style_class: 'message-dialog-title',
+        }));
+        dialog.contentLayout.add_child(new St.Label({
+            text: `This will run prime-select ${profile} and reboot the system.`,
+            style_class: 'message-dialog-description',
+        }));
+        dialog.setButtons([
+            {
+                label: 'Cancel',
+                action: () => dialog.close(),
+                key: Clutter.KEY_Escape,
+            },
+            {
+                label: 'Switch and Reboot',
+                action: () => {
+                    dialog.close();
+                    this._switchProfile(profile);
+                },
+                default: true,
+            },
+        ]);
+        dialog.open();
+    }
+
+    _switchProfile(profile) {
+        this._switching = true;
+        this.subtitle = 'Switching...';
+        this.menu.setHeader(
+            'power-profile-performance-symbolic',
+            this.title,
+            `Switching to ${PrimeSelect.getProfileLabel(profile)}`
+        );
+        for (const [, item] of this._profileItems)
+            item.setSensitive(false);
+
+        PrimeSelect.switchProfile(profile, result => this._onSwitchComplete(result));
+    }
+
+    _onSwitchComplete(result) {
+        this._switching = false;
+
+        if (result.ok) {
+            this.subtitle = 'Rebooting...';
+            this.menu.setHeader('power-profile-performance-symbolic', this.title, 'Rebooting');
+            return;
         }
-        
-        this.doNotSwitch = false;
+
+        this._refresh();
+        Main.notifyError('Prime Select Quick Toggle', result.error || 'Unable to switch PRIME profile.');
+    }
+
+    _showSetupProblem() {
+        const problem = this._setupProblem ?? PrimeSelect.getSetupProblem();
+        if (problem)
+            Main.notifyError(problem.title, problem.message);
+    }
+
+    destroy() {
+        if (this._openStateId) {
+            this.menu.disconnect(this._openStateId);
+            this._openStateId = 0;
+        }
+        super.destroy();
     }
 });
 
 export const QuickSettingsIndicator = GObject.registerClass(
 class QuickSettingsIndicator extends QuickSettings.SystemIndicator {
-    _init(extensionObject) {
+    _init() {
         super._init();
     }
 
@@ -115,7 +167,9 @@ class QuickSettingsIndicator extends QuickSettings.SystemIndicator {
 
     disable() {
         this.quickSettingsItems.forEach(item => item.destroy());
-        this._indicator.destroy();
-        super.destroy();
+        this.quickSettingsItems = [];
+        this._indicator?.destroy();
+        this._indicator = null;
+        this.destroy();
     }
 });

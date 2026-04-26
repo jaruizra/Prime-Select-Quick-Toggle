@@ -32,32 +32,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Compile schemas
-        if: steps.check.outputs.exists == 'false'
-        run: glib-compile-schemas schemas/
-
       - name: Package extension
         if: steps.check.outputs.exists == 'false'
         run: |
           UUID=$(jq -r '.uuid' metadata.json)
-          zip -r "${UUID}.zip" \
+          zip -r "${UUID}.shell-extension.zip" \
             metadata.json \
             extension.js \
-            prefs.js \
+            README.md \
+            LICENSE \
             lib/ \
             ui/ \
-            schemas/ \
-            img/icon.png \
-            img/intel_icon_plain.svg \
-            img/nvidia_icon_plain.svg \
-            img/hybrid_icon_plain.svg
+            img/icon.png
 
       - name: Create release
         if: steps.check.outputs.exists == 'false'
         run: |
           UUID=$(jq -r '.uuid' metadata.json)
           gh release create "${{ steps.meta.outputs.tag }}" \
-            "${UUID}.zip" \
+            "${UUID}.shell-extension.zip" \
             --title "Version ${{ steps.meta.outputs.version }}" \
             --generate-notes
         env:

@@ -1,19 +1,14 @@
 {
-  "description": "A GNOME Shell extension that provides an easy way to switch between GPU profiles on Nvidia Optimus systems (e.g., laptops with Intel + Nvidia or AMD + Nvidia configurations) in just a few clicks. Requires envycontrol (https://github.com/bayasdev/envycontrol).",
-  "name": "GPU Profile Selector",
+  "uuid": "prime-select-quick-toggle@rura.local",
+  "name": "Prime Select Quick Toggle",
+  "description": "GNOME Quick Settings extension for Ubuntu NVIDIA PRIME profile switching via prime-select.",
   "shell-version": [
-    "45",
-    "46",
-    "47",
-    "48",
-    "49"
+    "50"
   ],
-  "gettext-domain": "GPU_profile_selector",
-  "url": "https://github.com/LorenzoMorelli/GPU_profile_selector",
-  "uuid": "GPU_profile_selector@lorenzo9904.gmail.com",
-  "settings-schema": "org.gnome.shell.extensions.GPU_profile_selector",
-  "version": 25,
-  "author": "Lorenzo Morelli",
+  "url": "https://github.com/rura/prime-select-quick-toggle",
+  "gettext-domain": "prime-select-quick-toggle",
+  "version": 1,
+  "author": "rura",
   "contributors": [
     "Lorenzo Morelli",
     "Guilhem Jéhanno",
